@@ -133,7 +133,7 @@ class ImageDatasets(data.Dataset):
         if self.transform is not None:
             'includes (pil) image to tensor in transform'
             tImage = self.transform(tImage)
-        print(data_transforms['train'](tImage).shape)
+        
         return tImage,torch.FloatTensor(label) #returns [3,width,height] torch for pil image and [2] tensor for V-A label
 
 
