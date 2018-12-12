@@ -38,7 +38,7 @@ from PIL import Image, ImageDraw
 
 #when sending jobs to cluster, set runserver to True so that remote dir is set
 runServer = False
-curDir = "/home/baca/ValenceArousal/"
+curDir = os.getcwd()+'/'
 
 if runServer :
     curDir = '/homedtic/gulloa/ValenceArousal/'
@@ -311,7 +311,7 @@ def test():
     model_ft.to(device)
     model_ft.eval()
 
-    listImage = [os.getcwd()+'/testImages/fddb__image2665_0.jpg',os.getcwd()+'/testImages/fddb__image2666_0.jpg',os.getcwd()+'/testImages/fddb__image2667_0.jpg',os.getcwd()+'/testImages/fddb__image2668_0.jpg']
+    listImage = [curDir+'testImages/fddb__image2665_0.jpg',curDir+'testImages/fddb__image2666_0.jpg',curDir+'testImages/fddb__image2667_0.jpg',curDir+'testImages/fddb__image2668_0.jpg']
 
     tl = []
 

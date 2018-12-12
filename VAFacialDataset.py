@@ -21,6 +21,12 @@ from skimage.util import random_noise
 from utils import *
 #from config import *
 
+#when sending jobs to cluster, set runserver to True so that remote dir is set
+runServer = False
+curDir = os.getcwd()
+
+if runServer :
+    curDir = '/homedtic/gulloa/ValenceArousal/'
 
 class ImageDatasets(data.Dataset):
 
@@ -44,7 +50,7 @@ class ImageDatasets(data.Dataset):
         'This for is to get images and labels directory paths'
         for data in data_list :  #iterates over all the list passed as first argument (0th level): afew-Train'
             print(("Opening "+data))
-            collections_dir = path.join(path.join(os.getcwd(), 'images'),data)
+            collections_dir = path.join(path.join(curDir, 'images'),data)
             for col_f in os.listdir(collections_dir): #walks into 1st level directories'
                 col_f_dir = path.join(collections_dir,col_f)
                 #print(col_f_dir)
@@ -133,7 +139,7 @@ class ImageDatasets(data.Dataset):
         if self.transform is not None:
             'includes (pil) image to tensor in transform'
             tImage = self.transform(tImage)
-        
+
         return tImage,torch.FloatTensor(label) #returns [3,width,height] torch for pil image and [2] tensor for V-A label
 
 
