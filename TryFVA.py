@@ -2,9 +2,9 @@ from __future__ import print_function
 from __future__ import division
 
 '''
-Modified on Dec 09, 2018 from original by deckyal
+Modified on Dec, 2018 from original by deckyal
 
-@author: gary
+@author: stefano
 '''
 #https://pytorch.org/tutorials/beginner/finetuning_torchvision_models_tutorial.html
 #Fine tuning and feature extracton
@@ -12,7 +12,6 @@ Modified on Dec 09, 2018 from original by deckyal
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
 
 import cv2
 
@@ -34,14 +33,20 @@ print("Torchvision Version: ",torchvision.__version__)
 #import file_walker
 from utils import *
 #from config import *
-from VAFacialDataset import ImageDatasets #,VideoDataset
+from VAFacialDataset import ImageDatasets
 from PIL import Image, ImageDraw
 
+#when sending jobs to cluster, set runserver to True so that remote dir is set
+runServer = False
+curDir = "/home/baca/ValenceArousal/"
 
-# Detect if we have a GPU available
+if runServer :
+    curDir = '/homedtic/gulloa/ValenceArousal/'
+
+# Detect if GPU available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def train_model(model, dataloaders, criterion, optimizer, num_epochs = 25, is_inception = False):
+def train_model(model, dataloaders, criterion, optimizer, model_name, batch_size, num_epochs = 25, is_inception = False):
     since = time.time()
     val_acc_history = []
 
@@ -80,19 +85,20 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs = 25, is_in
                 else :
                     outputs = model(inputs)
                     loss = criterion(outputs, labels)
-
+                '''
+                print(outputs[0], '___', labels[0])
+                print('-'*5)
+                print(outputs, '___', labels)
+                '''
                 #_,preds = torch.max(outputs,1)
-
                 loss.backward()
+                #in case of possible gradient explotion (nan loss values, usually with inception), call:
+                torch.nn.utils.clip_grad_norm_(model.parameters(),1)
                 optimizer.step()
 
             #statistics
             running_loss += loss.item() * inputs.size(0)
-            print("{}/{} loss : {}".format(x,int(len(dataloader.dataset)/batch_size),loss.item()))
-
-            #print(rinputs.shape, outputs.shape, rlabels.shape)
-
-
+            print("{}/{} loss : {}".format(x,int(len(dataloaders.dataset)/batch_size),loss.item()))
             #running_corrects += torch.sum(preds == labels.data)
 
         epoch_loss = running_loss / len(dataloaders.dataset)
@@ -100,22 +106,20 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs = 25, is_in
 
         print('Loss : {:.4f}'.format(epoch_loss))
 
+        "this if prevents saving when loss is nan"
         #Deep copy the model
         if epoch_loss < lowest_loss :
             lowest_loss = epoch_loss
             best_model_wts = copy.deepcopy(model.state_dict())
+            now = time.time()
             print(outputs[0],labels[0])
-            #torch.save(model.state_dict(),'netFL.pt')
+            torch.save(model.state_dict(),curDir+model_name+str(epoch)+'netFVA.pt') #it has to be here so that for a big nums_epochs we still can retrieve the best model (minimum loss) without waiting for all epochs to occur
+            "write log to know if current best model is good enough because cluster will not give output until terminating all epochs"
+            with open(curDir+model_name+'VAlog.txt','a') as file:
+                file.write('epoch: ' + str(epoch) + '   epoch_loss: ' + str(epoch_loss) + '    time: ' + str(now) + '\n-----\n')
+                file.write('outputs: ' + str(outputs.tolist()[0][0]) + ' ' + str(outputs.tolist()[0][1]) + '     labels: ' + str(labels.tolist()[0][0]) + ' ' + str(labels.tolist()[0][1]))
+                file.write('\n-----\n')
 
-        '''
-        #GaryComment
-        rinputs will have all the transformations declared in getitem, so unnormalizedandlandmark will have to reverse them
-        outputs indicates landmark coordinates prediction
-        rlabels indicates actual landmark coordinates (ground_truth)
-        these 2 will be added to each image, so that plotimages can show the new image
-        '''
-
-    torch.save(best_model_wts,'netFL.pt')
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
     print('Best val Acc: {:4f}'.format(lowest_loss))
@@ -139,10 +143,8 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained = 
         model_ft = models.resnet152(pretrained = use_pretrained)
 
         '''
-        !!!
-        #GaryComment
         in case, feature_extract is true, set_parameter_requires_grad will set all grad parameters to false
-        and because after this operation, a new layer (the output one) is added, these parameters will have grad as true
+        and because after this operation a new layer (the output one) is added, these new parameters will have grad as true
         '''
 
         set_parameter_requires_grad(model_ft, feature_extract)
@@ -221,12 +223,7 @@ def train():
     # Data augmentation and normalization for training
     # Just normalization for validation
 
-    '''
-    GaryComment
-    toTensor transforms PIL image numpy array HxWxC [0,255] to tensor CxHxW [0,1]
-    HxWxC: RGB, RGB, ..., RGB    CxHxW: RR...R,GG...G,BB...B   C is
-
-    '''
+    "toTensor transforms PIL image numpy array HxWxC [0,255] to tensor CxHxW [0,1] HxWxC: RGB, RGB, ..., RGB    CxHxW: RR...R,GG...G,BB...B "
 
     data_transforms = {
         'train': transforms.Compose([
@@ -244,53 +241,33 @@ def train():
     }
 
 
-    batch_size = 8
+    batch_size = 6
 
     ID = ImageDatasets(data_list = ['afew-Train'],transform=data_transforms['train'])
-    #VD = VideoDataset(data_list = ['toTest_M'],blurLevel=20,onlyFace = True, seq_length = 64, transform=transform)
-    print(len(ID))
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(device)
+
     dataloader = torch.utils.data.DataLoader(dataset = ID, batch_size = batch_size, shuffle = True)
-    #dataloader = torch.utils.data.DataLoader(dataset = VD, batch_size = batch_size, shuffle = True)
 
-
-    n_to_view = 4
-    #to opencv format
-
-
-
-    '''print("Initializing Datasets and Dataloaders...")
-
-    #Training and validation datasets.
-    image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x]) for x in ['train','val']}
-
-    #Now the dataloader
-    dataloaders_dict = {x:torch.utils.data.DataLoader(image_datasets[x],batch_size=batch_size,shuffle=True, num_workers = 4) for x in ['train','val']}
-    '''
 
     #model_ft.load_state_dict(torch.load('./netFL.pt', map_location=lambda storage, loc: storage))
 
-    '''
-    !!!
-    GaryComment
-    in case feature_extract is true, only output layer parameters will have grad as true, so these are the only needed in params_to_update
-    '''
+    "in case feature_extract is true, only output layer parameters will have grad as true, so these are the only needed in params_to_update"
     model_ft = model_ft.to(device)
     params_to_update = model_ft.parameters()
-    print("Params to learn ")
+    #print("Params to learn ")
 
     if feature_extract :
         params_to_update = []
         for name,param in model_ft.named_parameters():
             if param.requires_grad == True :
                 params_to_update.append(param)
-                print("\t",name)
+                #print("\t",name)
     else :
         for name,param in model_ft.named_parameters() :
             if param.requires_grad == True :
-                print("\t",name)
+                pass
+                #print("\t",name)
 
     optimizer_ft = optim.SGD(params_to_update,lr=.01, momentum = .9)
 
@@ -299,7 +276,7 @@ def train():
     criterion = nn.MSELoss()
 
     #Train and evaluate
-    model_ft, hist = train_model(model_ft, dataloader, criterion, optimizer_ft, num_epochs, is_inception = (model_name == "inception"))
+    model_ft, hist = train_model(model_ft, dataloader, criterion, optimizer_ft, model_name, batch_size, num_epochs, is_inception = (model_name == "inception"))
 
 def test():
     model_name = 'inception'
@@ -329,13 +306,12 @@ def test():
         ])
     }
 
-
-    model_ft.load_state_dict(torch.load('./netFL.pt', map_location=lambda storage, location:storage))
+    '''
+    model_ft.load_state_dict(torch.load('./netFL.pt'))
     model_ft.to(device)
     model_ft.eval()
 
-
-    listImage = ['\\testImages\\fddb__image2665_0.jpg','\\testImages\\fddb__image2666_0.jpg','\\testImages\\fddb__image2667_0.jpg','\\testImages\\fddb__image2668_0.jpg']
+    listImage = [os.getcwd()+'/testImages/fddb__image2665_0.jpg',os.getcwd()+'/testImages/fddb__image2666_0.jpg',os.getcwd()+'/testImages/fddb__image2667_0.jpg',os.getcwd()+'/testImages/fddb__image2668_0.jpg']
 
     tl = []
 
@@ -362,5 +338,6 @@ def test():
     output = output.detach().cpu()
     #img = output.cpu()[0]
     img = li.cpu()
+    '''
 
 train()
