@@ -22,11 +22,7 @@ from utils import *
 #from config import *
 
 #when sending jobs to cluster, set runserver to True so that remote dir is set
-runServer = False
 curDir = os.getcwd()
-
-if runServer :
-    curDir = '/homedtic/gulloa/ValenceArousal/'
 
 class ImageDatasets(data.Dataset):
 
@@ -115,13 +111,13 @@ class ImageDatasets(data.Dataset):
         self.l_imgs = list_images #images path TOGETGER
         self.l_gt = list_ground_truth #V-A labels TOGETHER
 
-        '''uncomment to get a log (do just once)
+        #uncomment to get a log (do just once)
         #log file containing images paths V-A values to check according to index in getitem (because collections are unnordered)
-        with open('log.txt','w') as f:
+        '''with open(curDir+'DSlog.txt','w') as f:
             for i in range(0,len(self.l_imgs)) :
                 f.write(str(i) + ' ' + self.l_imgs[i] + ' ' + str(self.l_gt[i]) + '\n')
-            f.write(str(len(self.l_imgs)))
-        '''
+            f.write(str(len(self.l_imgs)))'''
+
         #x,label  = self.l_imgs[1],self.l_gt[1].copy()
 
     'when iterating over dataloaders, getitem is called'

@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 import cv2
+import argparse
 
 from math import sqrt
 import re
@@ -23,10 +24,13 @@ import torchvision
 from torchvision import datasets, models, transforms
 import torchvision.utils as vutils
 
+from torch.utils.data.sampler import SubsetRandomSampler
+
 import matplotlib.pyplot as plt
 import time
 import os
 import copy
+import math
 print("PyTorch Version: ",torch.__version__)
 print("Torchvision Version: ",torchvision.__version__)
 
@@ -37,14 +41,17 @@ from VAFacialDataset import ImageDatasets
 from PIL import Image, ImageDraw
 
 #when sending jobs to cluster, set runserver to True so that remote dir is set
-runServer = False
 curDir = os.getcwd()+'/'
-
-if runServer :
-    curDir = '/homedtic/gulloa/ValenceArousal/'
 
 # Detect if GPU available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+parser = argparse.ArgumentParser()
+#[a-alexnet, d-densenet, i-inception, r-resnet, s-squeezenet, v-vgg]
+parser.add_argument('-m', '--model', nargs='?', const='a', type=str, default='r')
+parser.add_argument('-b', '--batchsize', nargs='?', const='8', type=int, default='8')
+parser.add_argument('-cg', '--clipgradnorm', nargs='?', const=0, type=int, default='0') #[0-false, 1-true]
+args = parser.parse_args()
 
 def train_model(model, dataloaders, criterion, optimizer, model_name, batch_size, num_epochs = 25, is_inception = False):
     since = time.time()
@@ -92,8 +99,9 @@ def train_model(model, dataloaders, criterion, optimizer, model_name, batch_size
                 '''
                 #_,preds = torch.max(outputs,1)
                 loss.backward()
-                #in case of possible gradient explotion (nan loss values, usually with inception), call:
-                torch.nn.utils.clip_grad_norm_(model.parameters(),1)
+                #in case of possible gradient explotion (nan loss values), call:
+                if args.clipgradnorm:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(),1)
                 optimizer.step()
 
             #statistics
@@ -105,6 +113,7 @@ def train_model(model, dataloaders, criterion, optimizer, model_name, batch_size
         #epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
 
         print('Loss : {:.4f}'.format(epoch_loss))
+        print('Loss : {:.4f}'.format(lowest_loss))
 
         "this if prevents saving when loss is nan"
         #Deep copy the model
@@ -113,7 +122,7 @@ def train_model(model, dataloaders, criterion, optimizer, model_name, batch_size
             best_model_wts = copy.deepcopy(model.state_dict())
             now = time.time()
             print(outputs[0],labels[0])
-            torch.save(model.state_dict(),curDir+model_name+str(epoch)+'netFVA.pt') #it has to be here so that for a big nums_epochs we still can retrieve the best model (minimum loss) without waiting for all epochs to occur
+            torch.save(model.state_dict(),curDir+model_name+'netFVA.pt') #it has to be here so that for a big nums_epochs we still can retrieve the best model (minimum loss) without waiting for all epochs to occur
             "write log to know if current best model is good enough because cluster will not give output until terminating all epochs"
             with open(curDir+model_name+'VAlog.txt','a') as file:
                 file.write('epoch: ' + str(epoch) + '   epoch_loss: ' + str(epoch_loss) + '    time: ' + str(now) + '\n-----\n')
@@ -140,7 +149,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained = 
     input_size = 0
 
     if model_name == 'resnet' :
-        model_ft = models.resnet152(pretrained = use_pretrained)
+        model_ft = models.resnet50(pretrained = use_pretrained) #152
 
         '''
         in case, feature_extract is true, set_parameter_requires_grad will set all grad parameters to false
@@ -162,6 +171,16 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained = 
         num_ftrs = model_ft.classifier[6].in_features
 
         model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
+        input_size = 224
+
+    elif model_name == 'vgg':
+        model_ft = models.vgg11_bn(pretrained=use_pretrained)
+
+        set_parameter_requires_grad(model_ft, feature_extract)
+
+        num_ftrs = model_ft.classifier[6].in_features
+
+        model_ft.classifier[6] = nn.Linear(num_ftrs,num_classes)
         input_size = 224
 
     elif model_name == 'squeezenet' :
@@ -206,8 +225,18 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained = 
     return model_ft, input_size
 
 def train():
+
+    print('Starting net training mode', os.getcwd())
+
     #Model to chosse from [resnet, alexnet, vgg, squeezenet, densenet,inception]
-    model_name = 'inception'
+    model_name = args.model
+    if model_name=='a': model_name='alexnet'
+    elif model_name=='d': model_name='densenet'
+    elif model_name=='i': model_name='inception'
+    elif model_name=='r': model_name='resnet'
+    elif model_name=='s': model_name='squeezenet'
+    elif model_name=='v': model_name='vgg'
+    else: model_name=='invalid'
 
     #Number of classes
     num_classes = 2
@@ -240,14 +269,41 @@ def train():
         ])
     }
 
+    batch_size = args.batchsize
 
-    batch_size = 6
+    print('pretrained model: ' + model_name + '\tbatch size: ' + str(batch_size) + '\n')
 
+    print('Facial dataset')
     ID = ImageDatasets(data_list = ['afew-Train'],transform=data_transforms['train'])
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    dataloader = torch.utils.data.DataLoader(dataset = ID, batch_size = batch_size, shuffle = True)
+
+    'Cross validation section'
+    datasetLen = len(ID)
+    indices = list(range(datasetLen))
+    k = 5 #for this cross validation, k = 5
+    split = math.floor(datasetLen/k)+1 #+1, otherwise there would be an extra list of just one sample
+    #data is divided in k (roughly) equal parts
+    kPartsIndices = [indices[z:z+split] for z in range(0,len(indices),split)]
+
+    testIndLists=[]
+
+    for i in range(0, len(kPartsIndices)):
+        curTrainIndList=[]
+        #list of lists of indexes from the rest of parts
+        rest = kPartsIndices[:i] + kPartsIndices[i+1:]
+        [curTrainIndList.extend(rest[x]) for x in range(0,len(rest))] #extend and the loop to get all lists elements in one list
+
+        #list of lists of the individual part
+        testIndLists.append(kPartsIndices[i])
+
+    print(testIndLists)
+    trainsampler = SubsetRandomSampler(kPartsIndices[1])
+    testsampler = SubsetRandomSampler(testS)
+
+
+    '''dataloader = torch.utils.data.DataLoader(dataset = ID, batch_size = batch_size, sampler=trainsampler, shuffle = False)
 
 
     #model_ft.load_state_dict(torch.load('./netFL.pt', map_location=lambda storage, loc: storage))
@@ -276,10 +332,10 @@ def train():
     criterion = nn.MSELoss()
 
     #Train and evaluate
-    model_ft, hist = train_model(model_ft, dataloader, criterion, optimizer_ft, model_name, batch_size, num_epochs, is_inception = (model_name == "inception"))
+    model_ft, hist = train_model(model_ft, dataloader, criterion, optimizer_ft, model_name, batch_size, num_epochs, is_inception = (model_name == "inception"))'''
 
 def test():
-    model_name = 'inception'
+    model_name = 'densenet'
 
     #Number of classes
     num_classes = 2
