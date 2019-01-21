@@ -53,7 +53,7 @@ parser.add_argument('-b', '--batchsize', nargs='?', const='8', type=int, default
 parser.add_argument('-cg', '--clipgradnorm', nargs='?', const=0, type=int, default='0') #[0-false, 1-true]
 args = parser.parse_args()
 
-def train_model(model, dataloaders, criterion, optimizer, model_name, batch_size, num_epochs = 25, is_inception = False):
+def train_model(model, dataloaders, datasetSize, criterion, optimizer, model_name, batch_size, num_epochs = 25, is_inception = False):
     since = time.time()
     val_acc_history = []
 
@@ -106,10 +106,10 @@ def train_model(model, dataloaders, criterion, optimizer, model_name, batch_size
 
             #statistics
             running_loss += loss.item() * inputs.size(0)
-            print("{}/{} loss : {}".format(x,int(len(dataloaders.dataset)/batch_size),loss.item()))
+            print("{}/{} loss : {}".format(x,int(datasetSize/batch_size),loss.item()))
             #running_corrects += torch.sum(preds == labels.data)
 
-        epoch_loss = running_loss / len(dataloaders.dataset)
+        epoch_loss = running_loss / datasetSize
         #epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
 
         print('Loss : {:.4f}'.format(epoch_loss))
@@ -287,23 +287,28 @@ def train():
     #data is divided in k (roughly) equal parts
     kPartsIndices = [indices[z:z+split] for z in range(0,len(indices),split)]
 
+    trainIndLists=[]
     testIndLists=[]
 
     for i in range(0, len(kPartsIndices)):
         curTrainIndList=[]
+
         #list of lists of indexes from the rest of parts
         rest = kPartsIndices[:i] + kPartsIndices[i+1:]
-        [curTrainIndList.extend(rest[x]) for x in range(0,len(rest))] #extend and the loop to get all lists elements in one list
 
-        #list of lists of the individual part
+        [curTrainIndList.extend(rest[x]) for x in range(0,len(rest))] #extend and the loop to get all rest lists elements in one list
+        #list of lists of the rest parts
+        trainIndLists.append(curTrainIndList)
+
+        #list of lists of the individual parts
         testIndLists.append(kPartsIndices[i])
 
-    print(testIndLists)
-    trainsampler = SubsetRandomSampler(kPartsIndices[1])
-    testsampler = SubsetRandomSampler(testS)
+    datasetSize = len(trainIndLists[0]) #cannot use dataloader.datasets because it outputs all data, not just sampler ones
+    trainsampler = SubsetRandomSampler(trainIndLists[0])
+    #testsampler = SubsetRandomSampler(testS)
 
 
-    '''dataloader = torch.utils.data.DataLoader(dataset = ID, batch_size = batch_size, sampler=trainsampler, shuffle = False)
+    dataloader = torch.utils.data.DataLoader(dataset = ID, batch_size = batch_size, sampler=trainsampler, shuffle = False) #when supplying a sampler, shuffle has to be false, SubsetRandomSampler takes care of shuffling at each iteration
 
 
     #model_ft.load_state_dict(torch.load('./netFL.pt', map_location=lambda storage, loc: storage))
@@ -332,7 +337,7 @@ def train():
     criterion = nn.MSELoss()
 
     #Train and evaluate
-    model_ft, hist = train_model(model_ft, dataloader, criterion, optimizer_ft, model_name, batch_size, num_epochs, is_inception = (model_name == "inception"))'''
+    model_ft, hist = train_model(model_ft, dataloader, datasetSize, criterion, optimizer_ft, model_name, batch_size, num_epochs, is_inception = (model_name == "inception"))
 
 def test():
     model_name = 'densenet'
