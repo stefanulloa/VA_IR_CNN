@@ -53,7 +53,7 @@ parser.add_argument('-b', '--batchsize', nargs='?', const='8', type=int, default
 parser.add_argument('-cg', '--clipgradnorm', nargs='?', const=0, type=int, default='0') #[0-false, 1-true]
 args = parser.parse_args()
 
-def train_model(model, dataloaders, datasetSize, criterion, optimizer, model_name, batch_size, num_epochs = 25, is_inception = False):
+def train_model(model, dataloaders, datasetSize, criterion, optimizer, model_name, batch_size, CVpositionPart, num_epochs = 25, is_inception = False):
     since = time.time()
     val_acc_history = []
 
@@ -122,9 +122,9 @@ def train_model(model, dataloaders, datasetSize, criterion, optimizer, model_nam
             best_model_wts = copy.deepcopy(model.state_dict())
             now = time.time()
             print(outputs[0],labels[0])
-            torch.save(model.state_dict(),curDir+model_name+'netFVA.pt') #it has to be here so that for a big nums_epochs we still can retrieve the best model (minimum loss) without waiting for all epochs to occur
+            torch.save(model.state_dict(),curDir+model_name+'CV'+str(CVpositionPart)+'netFVA.pt') #it has to be here so that for a big nums_epochs we still can retrieve the best model (minimum loss) without waiting for all epochs to occur
             "write log to know if current best model is good enough because cluster will not give output until terminating all epochs"
-            with open(curDir+model_name+'VAlog.txt','a') as file:
+            with open(curDir+model_name+'CV'+str(CVpositionPart)+'VAlog.txt','a') as file:
                 file.write('epoch: ' + str(epoch) + '   epoch_loss: ' + str(epoch_loss) + '    time: ' + str(now) + '\n-----\n')
                 file.write('outputs: ' + str(outputs.tolist()[0][0]) + ' ' + str(outputs.tolist()[0][1]) + '     labels: ' + str(labels.tolist()[0][0]) + ' ' + str(labels.tolist()[0][1]))
                 file.write('\n-----\n')
@@ -242,12 +242,15 @@ def train():
     num_classes = 2
 
     #Batch size
-    num_epochs = 1000
+    num_epochs = 2
 
     feature_extract = False
     #Intialize the model for this run
-    model_ft , image_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
 
+    type224Models = ['alexnet','densenet','resnet','squeezenet','vgg']
+
+    if model_name in type224Models: image_size = 224
+    elif model_name == 'inception': image_size = 299
 
     # Data augmentation and normalization for training
     # Just normalization for validation
@@ -303,75 +306,49 @@ def train():
         #list of lists of the individual parts
         testIndLists.append(kPartsIndices[i])
 
-    datasetSize = len(trainIndLists[0]) #cannot use dataloader.datasets because it outputs all data, not just sampler ones
-    trainsampler = SubsetRandomSampler(trainIndLists[0])
-    #testsampler = SubsetRandomSampler(testS)
 
 
-    dataloader = torch.utils.data.DataLoader(dataset = ID, batch_size = batch_size, sampler=trainsampler, shuffle = False) #when supplying a sampler, shuffle has to be false, SubsetRandomSampler takes care of shuffling at each iteration
+    for x in range(0, len(trainIndLists)):
+
+        model_ft , image_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
+
+        datasetSize = len(trainIndLists[x]) #cannot use dataloader.datasets because it outputs all data, not just sampler ones
+        trainsampler = SubsetRandomSampler(trainIndLists[x])
+
+        dataloader = torch.utils.data.DataLoader(dataset = ID, batch_size = batch_size, sampler=trainsampler, shuffle = False) #when supplying a sampler, shuffle has to be false, SubsetRandomSampler takes care of shuffling at each iteration
 
 
-    #model_ft.load_state_dict(torch.load('./netFL.pt', map_location=lambda storage, loc: storage))
+        #model_ft.load_state_dict(torch.load('./netFL.pt', map_location=lambda storage, loc: storage))
 
-    "in case feature_extract is true, only output layer parameters will have grad as true, so these are the only needed in params_to_update"
-    model_ft = model_ft.to(device)
-    params_to_update = model_ft.parameters()
-    #print("Params to learn ")
+        "in case feature_extract is true, only output layer parameters will have grad as true, so these are the only needed in params_to_update"
+        model_ft = model_ft.to(device)
+        params_to_update = model_ft.parameters()
+        #print("Params to learn ")
 
-    if feature_extract :
-        params_to_update = []
-        for name,param in model_ft.named_parameters():
-            if param.requires_grad == True :
-                params_to_update.append(param)
-                #print("\t",name)
-    else :
-        for name,param in model_ft.named_parameters() :
-            if param.requires_grad == True :
-                pass
-                #print("\t",name)
+        if feature_extract :
+            params_to_update = []
+            for name,param in model_ft.named_parameters():
+                if param.requires_grad == True :
+                    params_to_update.append(param)
+                    #print("\t",name)
+        else :
+            for name,param in model_ft.named_parameters() :
+                if param.requires_grad == True :
+                    pass
+                    #print("\t",name)
 
-    optimizer_ft = optim.SGD(params_to_update,lr=.01, momentum = .9)
+        optimizer_ft = optim.SGD(params_to_update,lr=.01, momentum = .9)
 
 
-    #loss
-    criterion = nn.MSELoss()
+        #loss
+        criterion = nn.MSELoss()
 
-    #Train and evaluate
-    model_ft, hist = train_model(model_ft, dataloader, datasetSize, criterion, optimizer_ft, model_name, batch_size, num_epochs, is_inception = (model_name == "inception"))
+        #Train and evaluate
+        model_ft, hist = train_model(model_ft, dataloader, datasetSize, criterion, optimizer_ft, model_name, batch_size, x, num_epochs, is_inception = (model_name == "inception"))
 
 def test():
-    model_name = 'densenet'
-
-    #Number of classes
-    num_classes = 2
-
-    feature_extract = False
-    #Intialize the model for this run
-    model_ft , image_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
-
-
-    # Data augmentation and normalization for training
-    # Just normalization for validation
-    data_transforms = {
-        'train': transforms.Compose([
-            transforms.RandomResizedCrop(image_size),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ]),
-        'val': transforms.Compose([
-            transforms.Resize((image_size,image_size)),
-            #transforms.CenterCrop(image_size),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
-    }
 
     '''
-    model_ft.load_state_dict(torch.load('./netFL.pt'))
-    model_ft.to(device)
-    model_ft.eval()
-
     listImage = [curDir+'testImages/fddb__image2665_0.jpg',curDir+'testImages/fddb__image2666_0.jpg',curDir+'testImages/fddb__image2667_0.jpg',curDir+'testImages/fddb__image2668_0.jpg']
 
     tl = []
