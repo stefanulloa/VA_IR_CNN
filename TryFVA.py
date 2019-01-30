@@ -53,6 +53,13 @@ parser.add_argument('-b', '--batchsize', nargs='?', const='8', type=int, default
 parser.add_argument('-cg', '--clipgradnorm', nargs='?', const=0, type=int, default='0') #[0-false, 1-true]
 args = parser.parse_args()
 
+def RMSELoss(ypred, yact):
+    return torch.sqrt(torch.mean((ypred-yact)**2))
+
+'''def COR(ypred, yact):
+
+    return'''
+
 def train_model(model, dataloaders, datasetSize, criterion, optimizer, model_name, batch_size, CVpositionPart, num_epochs = 25, is_inception = False):
     since = time.time()
     val_acc_history = []
@@ -138,6 +145,50 @@ def train_model(model, dataloaders, datasetSize, criterion, optimizer, model_nam
 
     return model, val_acc_history
 
+def evaluate_model(model, dataloaders, datasetSize, model_name, batch_size, CVpositionPart, is_inception = False):
+
+    since = time.time()
+    val_acc_history = []
+    predValenceSum = 0
+    labelValenceSum = 0
+    predArousalSum = 0
+    labelArousalSum = 0
+
+    model.eval()
+
+    print('computing mean values')
+    #first compute the mean of he different variables :
+    for x,(rinputs, rlabels) in enumerate(dataloaders,0) :
+
+        inputs = rinputs.to(device)
+        labels = rlabels.to(device)
+
+        with torch.set_grad_enabled(False) :
+            if is_inception :
+                outputs, aux_outputs  = model(inputs)
+            else :
+                outputs = model(inputs)
+
+        #tensor structure: [arousal, valence]
+        predArousalSum += outputs[:,0].sum().item()
+        labelArousalSum += labels[:,0].sum().item()
+
+        predValenceSum += outputs[:,1].sum().item()
+        labelValenceSum += labels[:,1].sum().item()
+
+        print("{}/{} MPA : {}, MLA : {}, MPV : {}, MLV : {}".format(x,int(datasetSize/batch_size),predArousalSum, labelArousalSum, predValenceSum, labelArousalSum))
+
+    meanPredArousal = predArousalSum / datasetSize
+    meanLabelArousal = labelArousalSum / datasetSize
+    meanPredValence = predValenceSum / datasetSize
+    meanLabelValence = labelArousalSum / datasetSize
+
+    print(meanPredArousal, meanLabelArousal, meanPredValence, meanLabelValence)
+
+    time_elapsed = time.time() - since
+    print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
+
+    return val_acc_history
 
 def set_parameter_requires_grad(model, feature_extracting):
     if feature_extracting :
@@ -348,6 +399,76 @@ def train():
 
 def test():
 
+    print('Starting net testing mode', os.getcwd())
+
+    model_name = 'resnet'
+    image_size = 224
+    #Number of classes
+    num_classes = 2
+    #Intialize the model for this run
+    batch_size = 8
+
+    feature_extract = False
+
+    # Data augmentation and normalization for training
+    # Just normalization for validation
+    data_transforms = {
+        'train': transforms.Compose([
+            transforms.RandomResizedCrop(image_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ]),
+        'val': transforms.Compose([
+            transforms.Resize((image_size,image_size)),
+            #transforms.CenterCrop(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+    }
+
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+    print('pretrained model: ' + model_name + '\tbatch size: ' + str(batch_size) + '\n')
+
+    print('Facial dataset')
+    ID = ImageDatasets(data_list = ['afew-Train'],transform=data_transforms['val'])
+
+
+    'Cross validation section'
+    datasetLen = len(ID)
+    indices = list(range(datasetLen))
+    k = 5 #for this cross validation, k = 5
+    split = math.floor(datasetLen/k)+1 #+1, otherwise there would be an extra list of just one sample
+    #data is divided in k (roughly) equal parts
+    kPartsIndices = [indices[z:z+split] for z in range(0,len(indices),split)]
+
+    testIndLists=[]
+
+    for i in range(0, len(kPartsIndices)):
+        #list of lists of the individual parts
+        testIndLists.append(kPartsIndices[i])
+
+    for x in range(0, 1): #len(testIndLists)):
+
+        model_ft , image_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
+
+        model_ft.load_state_dict(torch.load('./resnetCV'+str(x)+'netFVA.pt'))
+        #model_ft.to(device)
+        #model_ft.eval()
+
+        datasetSize = len(testIndLists[x]) #cannot use dataloader.datasets because it outputs all data, not just sampler ones
+        testsampler = SubsetRandomSampler(testIndLists[x])
+
+        dataloader = torch.utils.data.DataLoader(dataset = ID, batch_size = batch_size, sampler=testsampler, shuffle = False) #when supplying a sampler, shuffle has to be false, SubsetRandomSampler takes care of shuffling at each iteration
+
+        model_ft = model_ft.to(device)
+
+        #evaluate
+        hist = evaluate_model(model_ft, dataloader, datasetSize, model_name, batch_size, x, is_inception = (model_name == "inception"))
+
     '''
     listImage = [curDir+'testImages/fddb__image2665_0.jpg',curDir+'testImages/fddb__image2666_0.jpg',curDir+'testImages/fddb__image2667_0.jpg',curDir+'testImages/fddb__image2668_0.jpg']
 
@@ -378,4 +499,4 @@ def test():
     img = li.cpu()
     '''
 
-train()
+test()
