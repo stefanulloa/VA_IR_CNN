@@ -108,15 +108,19 @@ class ImageDatasets(data.Dataset):
                 list_ground_truth[indexer] = np.array(list_labels[i][j]) #actual store of labels in ground_truth
                 indexer += 1
 
-        self.l_imgs = list_images #images path TOGETGER
-        self.l_gt = list_ground_truth #V-A labels TOGETHER
+        #order images and ground truth by index position
+        firstzip = zip(list_images,list_ground_truth)
+        ordered_list_images, ordered_list_ground_truth = (list(t) for t in zip(*sorted(firstzip)))
+
+        self.l_imgs = ordered_list_images #images path TOGETGER
+        self.l_gt = ordered_list_ground_truth #V-A labels TOGETHER
 
         #uncomment to get a log (do just once)
         #log file containing images paths V-A values to check according to index in getitem (because collections are unnordered)
-        '''with open(curDir+'DSlog.txt','w') as f:
+        with open(curDir+'orderedDSlog.txt','w') as f:
             for i in range(0,len(self.l_imgs)) :
                 f.write(str(i) + ' ' + self.l_imgs[i] + ' ' + str(self.l_gt[i]) + '\n')
-            f.write(str(len(self.l_imgs)))'''
+            f.write(str(len(self.l_imgs)))
 
         #x,label  = self.l_imgs[1],self.l_gt[1].copy()
 
@@ -143,5 +147,6 @@ class ImageDatasets(data.Dataset):
 
         return len(self.l_imgs)
 
-#a = ImageDatasets()
+a = ImageDatasets()
+#print(a.l_imgs)
 #a.__getitem__(24643)
