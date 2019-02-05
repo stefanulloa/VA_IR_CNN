@@ -56,10 +56,6 @@ args = parser.parse_args()
 def RMSELoss(ypred, yact):
     return torch.sqrt(torch.mean((ypred-yact)**2))
 
-'''def COR(ypred, yact):
-
-    return'''
-
 def train_model(model, dataloaders, datasetSize, criterion, optimizer, model_name, batch_size, CVpositionPart, num_epochs = 25, is_inception = False):
     since = time.time()
     val_acc_history = []
@@ -176,17 +172,102 @@ def evaluate_model(model, dataloaders, datasetSize, model_name, batch_size, CVpo
         predValenceSum += outputs[:,1].sum().item()
         labelValenceSum += labels[:,1].sum().item()
 
-        print("{}/{} MPA : {}, MLA : {}, MPV : {}, MLV : {}".format(x,int(datasetSize/batch_size),predArousalSum, labelArousalSum, predValenceSum, labelArousalSum))
+        print("COMPUTING {}/{} MPA : {}, MLA : {}, MPV : {}, MLV : {}".format(x,int(datasetSize/batch_size),predArousalSum, labelArousalSum, predValenceSum, labelArousalSum))
 
     meanPredArousal = predArousalSum / datasetSize
     meanLabelArousal = labelArousalSum / datasetSize
     meanPredValence = predValenceSum / datasetSize
     meanLabelValence = labelArousalSum / datasetSize
 
-    print(meanPredArousal, meanLabelArousal, meanPredValence, meanLabelValence)
+    print("FINAL MPA : {}, MLA : {}, MPV : {}, MLV : {}".format(meanPredArousal, meanLabelArousal, meanPredValence, meanLabelValence))
+
+    arousalSquaredDifferenceSum = 0
+    valenceSquaredDifferenceSum = 0
+
+    arousalCOVSumPart = 0
+    valenceCOVSumPart = 0
+    arousalCOV = 0
+    valenceCOV = 0
+
+    stdPredArousalSquaredDifferenceSumPart = 0
+    stdLabelArousalSquaredDifferenceSumPart = 0
+    stdPredValenceSquaredDifferenceSumPart = 0
+    stdLabelValenceSquaredDifferenceSumPart = 0
+    stdPredArousal = 0
+    stdLabelArousal = 0
+    stdPredValence = 0
+    stdLabelValence = 0
+    #now compute the metrics that depend on mean :
+    for x,(rinputs, rlabels) in enumerate(dataloaders,0) :
+
+        #tensor structure: [arousal, valence]11
+        inputs = rinputs.to(device)
+        labels = rlabels.to(device)
+
+        with torch.set_grad_enabled(False) :
+            if is_inception :
+                outputs, aux_outputs  = model(inputs)
+            else :
+                outputs = model(inputs)
+
+        arousalSquaredDifferenceSum += ((outputs[:,0]-labels[:,0])**2).sum().item()
+        valenceSquaredDifferenceSum += ((outputs[:,1]-labels[:,1])**2).sum().item()
+
+        arousalCOVSumPart += ((outputs[:,0]-meanPredArousal) * labels[:,0]-meanLabelArousal).sum().item()
+        valenceCOVSumPart += ((outputs[:,1]-meanPredValence) * labels[:,1]-meanLabelValence).sum().item()
+
+        stdPredArousalSquaredDifferenceSumPart += ((outputs[:,0]-meanPredArousal)**2).sum().item()
+        stdLabelArousalSquaredDifferenceSumPart += ((labels[:,0]-meanLabelArousal)**2).sum().item()
+        stdPredValenceSquaredDifferenceSumPart += ((outputs[:,1]-meanPredValence)**2).sum().item()
+        stdLabelValenceSquaredDifferenceSumPart += ((labels[:,1]-meanLabelValence)**2).sum().item()
+
+        print("COMPUTING {}/{} ASDS : {}, VSDS : {}, ACSP : {}, VCSP : {}".format(x,int(datasetSize/batch_size),arousalSquaredDifferenceSum, valenceSquaredDifferenceSum, arousalCOVSumPart, valenceCOVSumPart))
+        '''print(labels)
+        print(outputs)
+        print(labels[:,0])
+        print(labels[:,1])
+        print(labels.size())
+        print(labels[:,0].sum().item())
+        print(labels[0])
+        print(labels[0][0])
+        print(labels[0][0].item())
+        print(arousalSquaredDifferenceSum)
+        print(valenceSquaredDifferenceSum)'''
+
+    RMSEArousal = math.sqrt(arousalSquaredDifferenceSum/datasetSize)
+    RMSEValence = math.sqrt(valenceSquaredDifferenceSum/datasetSize)
+
+
+    arousalCOV = arousalCOVSumPart / (datasetSize-1)
+    valenceCOV = valenceCOVSumPart / (datasetSize-1)
+
+    print('arousalCOV:', arousalCOV)
+    print('valenceCOV:', valenceCOV)
+
+    stdPredArousal = math.sqrt(stdPredArousalSquaredDifferenceSumPart/datasetSize)
+    stdLabelArousal = math.sqrt(stdLabelArousalSquaredDifferenceSumPart/datasetSize)
+    stdPredValence = math.sqrt(stdPredValenceSquaredDifferenceSumPart/datasetSize)
+    stdLabelValence = math.sqrt(stdLabelValenceSquaredDifferenceSumPart/datasetSize)
+
+    CORArousal = arousalCOV / (stdPredArousal * stdLabelArousal)
+    CORValence = valenceCOV / (stdPredValence * stdLabelValence)
+
+    ICCArousal = 2*arousalCOV/(math.pow(stdPredArousal,2)+math.pow(stdLabelArousal,2))
+    ICCValence = 2*valenceCOV/(math.pow(stdPredValence,2)+math.pow(stdLabelValence,2))
+
+    print("FINAL RMSEA : {}, RMSEV : {}, CORA : {}, CORV : {}, ICCA : {}, ICCV : {}".format(RMSEArousal, RMSEValence, CORArousal, CORValence, ICCArousal, ICCValence))
+
+    '''#statistics
+    running_loss += loss.item() * inputs.size(0)
+    print("{}/{} loss : {}".format(x,int(datasetSize/batch_size),loss.item()))'''
+    #running_corrects += torch.sum(preds == labels.data)
+
+    #epoch_loss = running_loss / datasetSize
+    #epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
+
 
     time_elapsed = time.time() - since
-    print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
+    print('Testing complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
 
     return val_acc_history
 
@@ -200,7 +281,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained = 
     input_size = 0
 
     if model_name == 'resnet' :
-        model_ft = models.resnet50(pretrained = use_pretrained) #152
+        model_ft = models.resnet152(pretrained = use_pretrained) #152
 
         '''
         in case, feature_extract is true, set_parameter_requires_grad will set all grad parameters to false
@@ -293,7 +374,7 @@ def train():
     num_classes = 2
 
     #Batch size
-    num_epochs = 2
+    num_epochs = 1000
 
     feature_extract = False
     #Intialize the model for this run
@@ -406,7 +487,7 @@ def test():
     #Number of classes
     num_classes = 2
     #Intialize the model for this run
-    batch_size = 8
+    batch_size = 1
 
     feature_extract = False
 
@@ -429,6 +510,7 @@ def test():
 
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
 
     print('pretrained model: ' + model_name + '\tbatch size: ' + str(batch_size) + '\n')
@@ -455,7 +537,7 @@ def test():
 
         model_ft , image_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
 
-        model_ft.load_state_dict(torch.load('./resnetCV'+str(x)+'netFVA.pt'))
+        #model_ft.load_state_dict(torch.load('./resnetCV'+str(x)+'netFVA.pt'))
         #model_ft.to(device)
         #model_ft.eval()
 
