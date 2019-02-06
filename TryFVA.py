@@ -59,6 +59,10 @@ def RMSELoss(ypred, yact):
 def train_model(model, dataloaders, datasetSize, criterion, optimizer, model_name, batch_size, CVpositionPart, num_epochs = 25, is_inception = False):
     since = time.time()
     val_acc_history = []
+    idDiff = ""
+    messageDiff = ""
+    only01 = True
+    only001 = True
 
     best_model_wts = copy.deepcopy(model.state_dict())
     lowest_loss = 99999
@@ -121,16 +125,30 @@ def train_model(model, dataloaders, datasetSize, criterion, optimizer, model_nam
         "this if prevents saving when loss is nan"
         #Deep copy the model
         if epoch_loss < lowest_loss :
+            loss_diff = lowest_loss-epoch_loss
+            if(loss_diff < 0.01 and loss_diff >= 0.001 and only01):
+                idDiff = "01"
+                messageDiff = "Model reached 0.01 tolerance     "
+                only01 = False
+            elif(loss_diff < 0.001 and only001):
+                idDiff = "001"
+                messageDiff = "Model reached 0.001 tolerance    "
+                only001 = False
             lowest_loss = epoch_loss
             best_model_wts = copy.deepcopy(model.state_dict())
             now = time.time()
             print(outputs[0],labels[0])
-            torch.save(model.state_dict(),curDir+model_name+'CV'+str(CVpositionPart)+'netFVA.pt') #it has to be here so that for a big nums_epochs we still can retrieve the best model (minimum loss) without waiting for all epochs to occur
+            if(idDiff == "01" or idDiff == "001"):
+                torch.save(model.state_dict(),curDir+model_name+'CV'+str(CVpositionPart)+idDiff+'netFVA.pt') #it has to be here so that for a big nums_epochs we still can retrieve the best model (minimum loss) without waiting for all epochs to occur
             "write log to know if current best model is good enough because cluster will not give output until terminating all epochs"
             with open(curDir+model_name+'CV'+str(CVpositionPart)+'VAlog.txt','a') as file:
-                file.write('epoch: ' + str(epoch) + '   epoch_loss: ' + str(epoch_loss) + '    time: ' + str(now) + '\n-----\n')
+                file.write(messageDiff + 'epoch: ' + str(epoch) + '   epoch_loss: ' + str(epoch_loss) + '    time: ' + str(now) + '\n-----\n')
                 file.write('outputs: ' + str(outputs.tolist()[0][0]) + ' ' + str(outputs.tolist()[0][1]) + '     labels: ' + str(labels.tolist()[0][0]) + ' ' + str(labels.tolist()[0][1]))
                 file.write('\n-----\n')
+            idDiff = ""
+            messageDiff = ""
+        if(!only001):
+            break
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
@@ -281,7 +299,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained = 
     input_size = 0
 
     if model_name == 'resnet' :
-        model_ft = models.resnet152(pretrained = use_pretrained) #152
+        model_ft = models.resnet152(pretrained = use_pretrained) #50 or 152
 
         '''
         in case, feature_extract is true, set_parameter_requires_grad will set all grad parameters to false
@@ -581,4 +599,4 @@ def test():
     img = li.cpu()
     '''
 
-test()
+train()
