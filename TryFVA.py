@@ -49,7 +49,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 parser = argparse.ArgumentParser()
 #[a-alexnet, d-densenet, i-inception, r-resnet, s-squeezenet, v-vgg]
 parser.add_argument('-m', '--model', nargs='?', const='a', type=str, default='r')
-parser.add_argument('-b', '--batchsize', nargs='?', const='8', type=int, default='8')
+parser.add_argument('-b', '--batchsize', nargs='?', const='8', type=int, default='58')
 parser.add_argument('-cg', '--clipgradnorm', nargs='?', const=0, type=int, default='0') #[0-false, 1-true]
 args = parser.parse_args()
 
@@ -139,7 +139,7 @@ def train_model(model, dataloaders, datasetSize, criterion, optimizer, model_nam
             now = time.time()
             print(outputs[0],labels[0])
             if(idDiff == "01" or idDiff == "001"):
-                torch.save(model.state_dict(),curDir+model_name+'CV'+str(CVpositionPart)+idDiff+'netFVA.pt') #it has to be here so that for a big nums_epochs we still can retrieve the best model (minimum loss) without waiting for all epochs to occur
+                torch.save(model.state_dict(),curDir+model_name+'CV'+str(CVpositionPart)+'_'+idDiff+'netFVA.pt') #it has to be here so that for a big nums_epochs we still can retrieve the best model (minimum loss) without waiting for all epochs to occur
             "write log to know if current best model is good enough because cluster will not give output until terminating all epochs"
             with open(curDir+model_name+'CV'+str(CVpositionPart)+'VAlog.txt','a') as file:
                 file.write(messageDiff + 'epoch: ' + str(epoch) + '   epoch_loss: ' + str(epoch_loss) + '    time: ' + str(now) + '\n-----\n')
@@ -147,7 +147,7 @@ def train_model(model, dataloaders, datasetSize, criterion, optimizer, model_nam
                 file.write('\n-----\n')
             idDiff = ""
             messageDiff = ""
-        if(!only001):
+        if(not only001):
             break
 
     time_elapsed = time.time() - since
@@ -218,7 +218,7 @@ def evaluate_model(model, dataloaders, datasetSize, model_name, batch_size, CVpo
     #now compute the metrics that depend on mean :
     for x,(rinputs, rlabels) in enumerate(dataloaders,0) :
 
-        #tensor structure: [arousal, valence]11
+        #tensor structure: [arousal, valence]
         inputs = rinputs.to(device)
         labels = rlabels.to(device)
 
@@ -231,8 +231,8 @@ def evaluate_model(model, dataloaders, datasetSize, model_name, batch_size, CVpo
         arousalSquaredDifferenceSum += ((outputs[:,0]-labels[:,0])**2).sum().item()
         valenceSquaredDifferenceSum += ((outputs[:,1]-labels[:,1])**2).sum().item()
 
-        arousalCOVSumPart += ((outputs[:,0]-meanPredArousal) * labels[:,0]-meanLabelArousal).sum().item()
-        valenceCOVSumPart += ((outputs[:,1]-meanPredValence) * labels[:,1]-meanLabelValence).sum().item()
+        arousalCOVSumPart += ((outputs[:,0]-meanPredArousal) * (labels[:,0]-meanLabelArousal)).sum().item()
+        valenceCOVSumPart += ((outputs[:,1]-meanPredValence) * (labels[:,1]-meanLabelValence)).sum().item()
 
         stdPredArousalSquaredDifferenceSumPart += ((outputs[:,0]-meanPredArousal)**2).sum().item()
         stdLabelArousalSquaredDifferenceSumPart += ((labels[:,0]-meanLabelArousal)**2).sum().item()
@@ -252,6 +252,10 @@ def evaluate_model(model, dataloaders, datasetSize, model_name, batch_size, CVpo
         print(arousalSquaredDifferenceSum)
         print(valenceSquaredDifferenceSum)'''
 
+    print("Dataset size: : {}".format(datasetSize))
+
+    print("FINAL MPA : {}, MLA : {}, MPV : {}, MLV : {}".format(meanPredArousal, meanLabelArousal, meanPredValence, meanLabelValence))
+
     RMSEArousal = math.sqrt(arousalSquaredDifferenceSum/datasetSize)
     RMSEValence = math.sqrt(valenceSquaredDifferenceSum/datasetSize)
 
@@ -270,8 +274,8 @@ def evaluate_model(model, dataloaders, datasetSize, model_name, batch_size, CVpo
     CORArousal = arousalCOV / (stdPredArousal * stdLabelArousal)
     CORValence = valenceCOV / (stdPredValence * stdLabelValence)
 
-    ICCArousal = 2*arousalCOV/(math.pow(stdPredArousal,2)+math.pow(stdLabelArousal,2))
-    ICCValence = 2*valenceCOV/(math.pow(stdPredValence,2)+math.pow(stdLabelValence,2))
+    ICCArousal = 2*arousalCOV/((stdPredArousal**2)+(stdLabelArousal**2))
+    ICCValence = 2*valenceCOV/((stdPredValence**2)+(stdLabelValence**2))
 
     print("FINAL RMSEA : {}, RMSEV : {}, CORA : {}, CORV : {}, ICCA : {}, ICCV : {}".format(RMSEArousal, RMSEValence, CORArousal, CORValence, ICCArousal, ICCValence))
 
@@ -458,7 +462,7 @@ def train():
 
 
 
-    for x in range(0, len(trainIndLists)):
+    for x in range(0, 5):
 
         model_ft , image_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
 
@@ -551,11 +555,11 @@ def test():
         #list of lists of the individual parts
         testIndLists.append(kPartsIndices[i])
 
-    for x in range(0, 1): #len(testIndLists)):
+    for x in range(0, 5): #len(testIndLists)):
 
         model_ft , image_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
 
-        #model_ft.load_state_dict(torch.load('./resnetCV'+str(x)+'netFVA.pt'))
+        model_ft.load_state_dict(torch.load('./resnet_CV5_clusterTraining/resnetCV'+str(x)+'_001netFVA.pt'))
         #model_ft.to(device)
         #model_ft.eval()
 
@@ -569,8 +573,39 @@ def test():
         #evaluate
         hist = evaluate_model(model_ft, dataloader, datasetSize, model_name, batch_size, x, is_inception = (model_name == "inception"))
 
-    '''
-    listImage = [curDir+'testImages/fddb__image2665_0.jpg',curDir+'testImages/fddb__image2666_0.jpg',curDir+'testImages/fddb__image2667_0.jpg',curDir+'testImages/fddb__image2668_0.jpg']
+
+def testingInstances():
+
+    model_name = "resnet"
+    num_classes = 2
+    feature_extract = False
+
+    model_ft , image_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
+
+    data_transforms = {
+        'train': transforms.Compose([
+            transforms.RandomResizedCrop(image_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ]),
+        'val': transforms.Compose([
+            transforms.Resize((image_size,image_size)),
+            #transforms.CenterCrop(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+    }
+
+    model_ft.load_state_dict(torch.load('./resnet_CV5_clusterTraining/resnetCV1_01netFVA.pt'))
+    model_ft.to(device)
+    model_ft.eval()
+
+    imagesPath = curDir+'images/afew-Train/02/' #02
+    number = "02_051_00000" #"02_051_00000"
+    number2 = "02_052_00000" #"02_052_00000"
+    listImage = [imagesPath+ 'img/'+number+'.png',imagesPath +'img/'+number2+'.png']
+    listLabels = [imagesPath+ 'annot2/'+number+'.aro',imagesPath +'annot2/'+number2+'.aro']
 
     tl = []
 
@@ -588,7 +623,7 @@ def test():
     li = li.to(device)
 
 
-    print(li,li.size())
+    #print(li,li.size())
 
     output  = model_ft.forward(li)
 
@@ -597,6 +632,12 @@ def test():
     output = output.detach().cpu()
     #img = output.cpu()[0]
     img = li.cpu()
-    '''
 
-train()
+    for x in listLabels:
+        with open(x) as f:
+        	line = f.readline()
+        print("label: ", line)
+
+
+
+testingInstances()
